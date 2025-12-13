@@ -1,159 +1,167 @@
 import pytest
-from credit_engine.scoring import v0_score
+from credit_engine.scoring import v0_decision
 
 
-def test_new_user_gets_minimum_limit():
+def base_features(**overrides):
     """
-    New users should always receive the minimum limit,
-    regardless of other inputs.
+    Helper to build a valid base feature set
+    and override only what matters per test.
     """
-    result = v0_score(
-        tenure_months=0,
-        avg_monthly_spend=0,
-        vend_frequency=0,
-        amount_volatility=0,
-        failed_vend_ratio=0,
-        is_new_user=True,
+    features = {
+        "vend_count_last_60_days": 12,
+        "days_since_last_vend": 2,
+        "vend_frequency": 3,
+        "median_vend_amount": 4000,
+        "vend_amount_volatility": 30,
+        "inter_vend_variance": 25,
+        "failed_vend_ratio": 5,
+        "has_active_obligation": False,
+    }
+    features.update(overrides)
+    return features
+
+
+# Hard gate tests
+
+def test_user_with_active_obligation_is_ineligible():
+    result = v0_decision(
+        base_features(has_active_obligation=True)
     )
 
-    assert result["score"] == 45
-    assert result["risk_band"] == "Marginal"
-    assert result["credit_limit"] == 2000
+    assert result["eligible"] is False
+    assert result["reason"] == "ACTIVE_OUTSTANDING_OBLIGATION"
+    assert result["approved_amount"] == 0
 
 
-def test_high_risk_user_is_not_eligible():
-    """
-    Users with very weak behavior signals
-    should be classified as High Risk and rejected.
-    """
-    result = v0_score(
-        tenure_months=1,
-        avg_monthly_spend=1500,
-        vend_frequency=0.5,
-        amount_volatility=80,
-        failed_vend_ratio=25,
-        is_new_user=False,
+def test_insufficient_history_is_rejected():
+    result = v0_decision(
+        base_features(vend_count_last_60_days=3)
     )
 
-    assert result["risk_band"] == "High Risk"
-    assert result["credit_limit"] == 0
+    assert result["eligible"] is False
+    assert result["reason"] == "INSUFFICIENT_HISTORY"
+    assert result["approved_amount"] == 0
 
 
-def test_weak_user_is_high_risk():
-    """
-    Users with low tenure, weak frequency,
-    high volatility, and failed vends
-    should be classified as High Risk.
-    """
-    result = v0_score(
-        tenure_months=3,
-        avg_monthly_spend=3000,
-        vend_frequency=1,
-        amount_volatility=55,
-        failed_vend_ratio=12,
-        is_new_user=False,
+def test_dormant_meter_is_rejected():
+    result = v0_decision(
+        base_features(days_since_last_vend=45)
     )
 
-    assert result["risk_band"] == "High Risk"
-    assert result["credit_limit"] == 0
+    assert result["eligible"] is False
+    assert result["reason"] == "DORMANT_METER"
+    assert result["approved_amount"] == 0
 
 
-def test_marginal_user_gets_minimum_limit():
-    """
-    Users with moderate but imperfect behavior
-    should be classified as Marginal.
-    """
-    result = v0_score(
-        tenure_months=6,            # +15
-        avg_monthly_spend=3500,     # +15
-        vend_frequency=2,           # +10
-        amount_volatility=40,       # +10
-        failed_vend_ratio=10,       # -10
-        is_new_user=False,
+def test_high_failed_vend_ratio_triggers_gate():
+    result = v0_decision(
+        base_features(failed_vend_ratio=30)
     )
 
-    # Total = 40
-    assert result["risk_band"] == "Marginal"
-    assert result["credit_limit"] == 2000
+    assert result["eligible"] is False
+    assert result["reason"] == "HIGH_FAILED_ATTEMPTS"
+    assert result["approved_amount"] == 0
 
 
-def test_bankable_user_gets_scaled_limit():
-    """
-    Bankable users should receive up to
-    10% of average monthly spend.
-    """
-    result = v0_score(
-        tenure_months=6,
-        avg_monthly_spend=5000,
-        vend_frequency=3,
-        amount_volatility=40,
-        failed_vend_ratio=5,
-        is_new_user=False,
+# Behaviour score & band tests
+
+def test_strong_behaviour_gets_band_a():
+    result = v0_decision(
+        base_features(
+            vend_frequency=6,
+            median_vend_amount=7000,
+            vend_amount_volatility=20,
+            inter_vend_variance=15,
+            failed_vend_ratio=2,
+        )
     )
 
-    assert result["risk_band"] == "Bankable"
-    assert result["credit_limit"] == 500  # 10% of 5000
+    assert result["eligible"] is True
+    assert result["score"] >= 80
+    assert result["band"] == "A"
+    assert result["approved_amount"] >= 2000
 
 
-def test_prime_user_gets_higher_limit():
-    """
-    Prime users should receive up to
-    20% of average monthly spend.
-    """
-    result = v0_score(
-        tenure_months=12,
-        avg_monthly_spend=10000,
-        vend_frequency=6,
-        amount_volatility=20,
-        failed_vend_ratio=2,
-        is_new_user=False,
+def test_good_behaviour_gets_band_b():
+    result = v0_decision(
+        base_features(
+            vend_frequency=4,
+            median_vend_amount=5000,
+            vend_amount_volatility=35,
+            inter_vend_variance=35,
+            failed_vend_ratio=5,
+        )
     )
 
-    assert result["risk_band"] == "Prime Meter"
-    assert result["credit_limit"] == 2000  # 20% of 10,000
+    assert result["eligible"] is True
+    assert 65 <= result["score"] < 80
+    assert result["band"] == "B"
 
 
-def test_credit_limit_is_capped_at_maximum():
-    """
-    Even prime users should not exceed
-    the global maximum credit limit.
-    """
-    result = v0_score(
-        tenure_months=24,
-        avg_monthly_spend=200000,
-        vend_frequency=10,
-        amount_volatility=10,
-        failed_vend_ratio=0,
-        is_new_user=False,
+def test_marginal_behaviour_gets_band_c():
+    result = v0_decision(
+        base_features(
+            vend_frequency=2,
+            median_vend_amount=3000,
+            vend_amount_volatility=50,
+            inter_vend_variance=50,
+            failed_vend_ratio=8,
+        )
     )
 
-    assert result["risk_band"] == "Prime Meter"
-    assert result["credit_limit"] == 20000
+    assert result["eligible"] is True
+    assert 50 <= result["score"] < 65
+    assert result["band"] == "C"
+    assert result["approved_amount"] == 2000
 
 
-@pytest.mark.parametrize(
-    "failed_vend_ratio, expected_penalty",
-    [
-        (0, 0),
-        (8, 0),
-        (10, -10),
-        (15, -10),
-        (25, -20),
-    ],
-)
-def test_failed_vend_penalties_are_applied(failed_vend_ratio, expected_penalty):
-    """
-    Failed vend ratios should correctly
-    apply penalty logic.
-    """
-    result = v0_score(
-        tenure_months=12,
-        avg_monthly_spend=8000,
-        vend_frequency=5,
-        amount_volatility=30,
-        failed_vend_ratio=failed_vend_ratio,
-        is_new_user=False,
+def test_weak_behaviour_is_declined():
+    result = v0_decision(
+        base_features(
+            vend_frequency=1,
+            median_vend_amount=1500,
+            vend_amount_volatility=80,
+            inter_vend_variance=70,
+            failed_vend_ratio=15,
+        )
     )
 
-    # We don't assert exact score, but ensure risk band degrades as expected
-    assert result["score"] <= 100
+    assert result["eligible"] is True
+    assert result["score"] < 50
+    assert result["band"] == "D"
+    assert result["approved_amount"] == 0
+
+
+# Limit sizing & risk adjustments
+
+def test_limit_scales_with_median_vend_amount():
+    low = v0_decision(
+        base_features(median_vend_amount=3000)
+    )
+    high = v0_decision(
+        base_features(median_vend_amount=6000)
+    )
+
+    assert high["approved_amount"] > low["approved_amount"]
+
+
+def test_high_volatility_does_not_increase_limit():
+    normal = v0_decision(
+        base_features(vend_amount_volatility=30)
+    )
+    volatile = v0_decision(
+        base_features(vend_amount_volatility=80)
+    )
+
+    assert volatile["approved_amount"] <= normal["approved_amount"]
+
+
+def test_low_frequency_does_not_increase_limit():
+    normal = v0_decision(
+        base_features(vend_frequency=3)
+    )
+    low_freq = v0_decision(
+        base_features(vend_frequency=1)
+    )
+
+    assert low_freq["approved_amount"] <= normal["approved_amount"]

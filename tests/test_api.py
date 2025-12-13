@@ -4,56 +4,139 @@ from api.main import app
 client = TestClient(app)
 
 
-def test_score_endpoint_bankable_user():
+def base_payload(**overrides):
     """
-    Test that the /score endpoint returns a valid response
-    for a typical bankable user.
+    Helper to build a valid base decision payload
+    and override only what matters per test.
     """
-
     payload = {
-        "tenure_months": 6,
-        "avg_monthly_spend": 4500,
+        "vend_count_last_60_days": 12,
+        "days_since_last_vend": 2,
         "vend_frequency": 3,
-        "amount_volatility": 40,
-        "failed_vend_ratio": 8,
-        "is_new_user": False
+        "median_vend_amount": 4000,
+        "vend_amount_volatility": 30,
+        "inter_vend_variance": 25,
+        "failed_vend_ratio": 5,
+        "has_active_obligation": False,
     }
+    payload.update(overrides)
+    return payload
 
-    response = client.post("/score", json=payload)
+
+# Successful decision scenarios
+
+def test_decision_endpoint_bankable_user():
+    """
+    Test that the /decision endpoint returns
+    a valid approval for a good behavioural profile.
+    """
+
+    response = client.post(
+        "/decision",
+        json=base_payload(
+            vend_frequency=4,
+            median_vend_amount=5000,
+            vend_amount_volatility=35,
+            inter_vend_variance=30,
+            failed_vend_ratio=5,
+        ),
+    )
 
     assert response.status_code == 200
 
     data = response.json()
 
-    # Validate response structure
+    assert data["eligible"] is True
     assert "score" in data
-    assert "risk_band" in data
-    assert "credit_limit" in data
+    assert "band" in data
+    assert "approved_amount" in data
 
-    # Validate expected logic
-    assert data["risk_band"] in ["Marginal", "Bankable", "Prime Meter"]
-    assert data["credit_limit"] >= 0
+    assert data["band"] in ["A", "B", "C"]
+    assert data["approved_amount"] >= 2000
 
 
-def test_score_endpoint_new_user():
+def test_decision_endpoint_prime_user():
     """
-    Test that new users always receive the minimum limit.
+    Strong behavioural users should receive
+    higher approved amounts.
     """
 
-    payload = {
-        "tenure_months": 0,
-        "avg_monthly_spend": 0,
-        "vend_frequency": 0,
-        "amount_volatility": 0,
-        "failed_vend_ratio": 0,
-        "is_new_user": True
-    }
-
-    response = client.post("/score", json=payload)
+    response = client.post(
+        "/decision",
+        json=base_payload(
+            vend_frequency=6,
+            median_vend_amount=8000,
+            vend_amount_volatility=20,
+            inter_vend_variance=15,
+            failed_vend_ratio=2,
+        ),
+    )
 
     assert response.status_code == 200
 
     data = response.json()
 
-    assert data["risk_band"] == "Marginal"
-    assert data["credit_limit"] == 2000
+    assert data["eligible"] is True
+    assert data["band"] == "A"
+    assert data["approved_amount"] > 2000
+
+
+# Decline scenarios (hard gates)
+
+def test_decision_endpoint_rejects_active_obligation():
+    """
+    Meters with an active obligation
+    should be declined immediately.
+    """
+
+    response = client.post(
+        "/decision",
+        json=base_payload(has_active_obligation=True),
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["eligible"] is False
+    assert data["reason"] == "ACTIVE_OUTSTANDING_OBLIGATION"
+    assert data["approved_amount"] == 0
+
+
+def test_decision_endpoint_rejects_insufficient_history():
+    """
+    Meters with insufficient recent activity
+    should be rejected at the hard gate stage.
+    """
+
+    response = client.post(
+        "/decision",
+        json=base_payload(vend_count_last_60_days=3),
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["eligible"] is False
+    assert data["reason"] == "INSUFFICIENT_HISTORY"
+    assert data["approved_amount"] == 0
+
+
+def test_decision_endpoint_rejects_dormant_meter():
+    """
+    Dormant meters should not be scored.
+    """
+
+    response = client.post(
+        "/decision",
+        json=base_payload(days_since_last_vend=45),
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["eligible"] is False
+    assert data["reason"] == "DORMANT_METER"
+    assert data["approved_amount"] == 0
