@@ -76,7 +76,7 @@ def compute_limit(
             adjusted_limit = envelope.channel_exposure_room
             reasons.append("channel_exposure_cap_limit")
 
-    # Respect user request
+    
     final_amount = min(inquiry.requested_value, adjusted_limit)
 
     if final_amount < GLOBAL_MIN_ADVANCE:
