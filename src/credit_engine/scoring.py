@@ -8,7 +8,7 @@ Deterministic, rule-based scoring model used to:
 
 """
 
-from credit_engine.config import (
+from src.credit_engine.config import (
     TENURE_WEIGHTS,
     SPEND_WEIGHTS,
     FREQUENCY_WEIGHTS,
