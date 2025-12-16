@@ -2,51 +2,36 @@
 Credit limit sizing logic for V0 model.
 """
 
-from typing import Tuple
-
-
 def determine_limit(
     score: int,
     median_vend_amount: float,
-    vend_frequency: float,
-    vend_amount_volatility: float,
-) -> Tuple[int, str]:
+    vend_count_last_60_days: int,
+) -> int:
     """
-    Returns:
-        (approved_limit, band)
+    Continuous limit sizing for V0.
 
-    Policy:
-    - Eligible users never receive 0
-    - Weak / volatile users get minimum advance
+    Goals:
+    - No discrete tiers
+    - No ₦0 approvals
+    - Wide distribution for learning
     """
 
     MIN_ADVANCE = 2000
+    MAX_ADVANCE = 20000
 
-    # Score bands
-    if score >= 80:
-        band = "A"
-        cap = 10000
-        k = 1.0
-    elif score >= 65:
-        band = "B"
-        cap = 7500
-        k = 0.8
-    elif score >= 50:
-        band = "C"
-        cap = 5000
-        k = 0.5
-    else:
-        # Weak behaviour → minimum advance, NOT zero
-        return MIN_ADVANCE, "D"
+    # Starter / low-history users
+    if vend_count_last_60_days < 3:
+        return MIN_ADVANCE
 
-    base_limit = min(cap, int(k * median_vend_amount))
+    # Confidence factor from score (0.1 → 0.6)
+    confidence = 0.1 + (score / 100) * 0.5
 
-    # Exposure adjustments (downward only)
-    if vend_frequency < 2:
-        base_limit = int(base_limit * 0.7)
+    raw_limit = confidence * median_vend_amount
 
-    if vend_amount_volatility > 60:
-        base_limit = int(base_limit * 0.7)
+    approved = int(raw_limit)
 
-    # Absolute floor enforcement (non-negotiable)
-    return max(base_limit, MIN_ADVANCE), band
+    # Enforce absolute bounds
+    approved = max(approved, MIN_ADVANCE)
+    approved = min(approved, MAX_ADVANCE)
+
+    return approved

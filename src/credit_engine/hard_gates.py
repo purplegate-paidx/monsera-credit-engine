@@ -9,27 +9,27 @@ from typing import Tuple
 
 
 def check_hard_gates(
-    vend_count_last_60_days: int,
-    days_since_last_vend: int,
     failed_vend_ratio: float,
+    days_since_last_vend: int,
     has_active_obligation: bool,
 ) -> Tuple[bool, str | None]:
     """
-    Returns:
-        (is_eligible, reason_code)
+    HARD gates for V0.
 
-    Policy:
-    - Only high failed attempts or obligations cause decline
-    - Insufficient history does NOT cause decline
+    Philosophy:
+    - V0 is a learning model, not a bank
+    - Only extreme cases should be declined
     """
 
     if has_active_obligation:
         return False, "ACTIVE_OUTSTANDING_OBLIGATION"
 
-    if failed_vend_ratio >= 25:
-        return False, "HIGH_FAILED_ATTEMPTS"
+    # Extreme friction / abuse only
+    if failed_vend_ratio >= 70:
+        return False, "EXTREME_FAILED_ATTEMPTS"
 
-    if days_since_last_vend > 30:
-        return False, "DORMANT_METER"
+    # Truly inactive meter
+    if days_since_last_vend > 90:
+        return False, "LONG_TERM_DORMANT_METER"
 
     return True, None

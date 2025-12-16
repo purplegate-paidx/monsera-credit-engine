@@ -8,59 +8,36 @@ from src.credit_engine.limit_engine import determine_limit
 
 
 def v0_decision(features: dict) -> dict:
-    """
-    End-to-end V0 decision.
-
-    Policy:
-    - Only risk causes decline
-    - Insufficient history → minimum advance
-    - Eligible users never receive 0
-    """
-
-    eligible, gate_reason = check_hard_gates(
-        vend_count_last_60_days=features["vend_count_last_60_days"],
-        days_since_last_vend=features["days_since_last_vend"],
+    eligible, reason = check_hard_gates(
         failed_vend_ratio=features["failed_vend_ratio"],
+        days_since_last_vend=features["days_since_last_vend"],
         has_active_obligation=features["has_active_obligation"],
     )
 
     if not eligible:
         return {
             "eligible": False,
-            "reason": gate_reason,
             "approved_amount": 0,
-        }
-
-    # Starter path (low history)
-    if features["vend_count_last_60_days"] < 3:
-        return {
-            "eligible": True,
-            "approved_amount": 2000,
-            "reason": "STARTER_MIN_LIMIT",
+            "reason": reason,
         }
 
     score = compute_behaviour_score(
+        vend_count_last_60_days=features["vend_count_last_60_days"],
         vend_frequency=features["vend_frequency"],
-        inter_vend_variance=features["inter_vend_variance"],
         median_vend_amount=features["median_vend_amount"],
         vend_amount_volatility=features["vend_amount_volatility"],
         failed_vend_ratio=features["failed_vend_ratio"],
+        days_since_last_vend=features["days_since_last_vend"],
     )
 
-    limit, band = determine_limit(
+    limit = determine_limit(
         score=score,
         median_vend_amount=features["median_vend_amount"],
-        vend_frequency=features["vend_frequency"],
-        vend_amount_volatility=features["vend_amount_volatility"],
+        vend_count_last_60_days=features["vend_count_last_60_days"],
     )
-
-    # Final safety net (should never trigger now, but defensive)
-    if limit < 2000:
-        limit = 2000
 
     return {
         "eligible": True,
         "score": score,
-        "band": band,
         "approved_amount": limit,
     }

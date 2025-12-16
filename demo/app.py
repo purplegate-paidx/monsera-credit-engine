@@ -4,12 +4,15 @@ import requests
 from datetime import timedelta
 
 API_URL = "https://monsera-credit-engine.onrender.com/decision"
-SUCCESS_STATUSES = {"SUCCESS", "COMPLETED"}
+SUCCESS_STATUSES = {"SUCCESS", "COMPLETED", "SUCCESSFUL"}
 
 st.set_page_config(page_title="Monsera Aggregator Demo", layout="wide")
 
-st.title("⚡ Monsera Aggregator Console (Demo)")
-st.caption("Real transaction data • Behavioural credit • DisCo-safe")
+st.title("⚡ Monsera Aggregator Console (V0 Demo)")
+st.caption(
+    "Behavioural credit for prepaid electricity • "
+    "Learning-first • DisCo-safe • Meter-enforced"
+)
 
 # --------------------------------------------------
 # Load data (cached for speed)
@@ -41,11 +44,10 @@ selected_user = st.selectbox(
 user_df = df[df["User_ID"] == selected_user].sort_values("Transaction_Date")
 
 service_provider = user_df["Service_Provider"].iloc[0]
-
 st.markdown(f"**Service Provider:** `{service_provider}`")
 
 # --------------------------------------------------
-# Show last 5 transactions only
+# Show last 5 transactions
 # --------------------------------------------------
 
 st.markdown("### Last 5 Transactions")
@@ -124,7 +126,7 @@ st.markdown("### Behaviour Summary (Derived)")
 st.json(features)
 
 # --------------------------------------------------
-# Vend simulation (stateful, realistic)
+# Vend simulation (stateful)
 # --------------------------------------------------
 
 st.markdown("### Vend Simulation")
@@ -137,15 +139,17 @@ vend_request = st.number_input(
     "Electricity requested (₦)", min_value=1000, value=4000, step=500
 )
 
-# Initialize state
+# Session state
 if "offer" not in st.session_state:
     st.session_state.offer = None
 
 if "decision_made" not in st.session_state:
     st.session_state.decision_made = None
 
-
+# --------------------------------------------------
 # Step 1: Request decision
+# --------------------------------------------------
+
 if st.button("Simulate Vend"):
     response = requests.post(API_URL, json=features, timeout=5)
     decision = response.json()
@@ -154,15 +158,19 @@ if st.button("Simulate Vend"):
         st.session_state.offer = None
         st.session_state.decision_made = "DECLINED"
 
-        st.error("❌ Credit declined")
-        st.markdown(f"**Reason:** {decision['reason']}")
-
+        st.error("❌ Credit declined (extreme risk detected)")
+        st.markdown(
+            "Declines at V0 occur **only** in cases of extreme abuse, "
+            "long-term inactivity, or unpaid obligations."
+        )
     else:
         st.session_state.offer = decision
         st.session_state.decision_made = None
 
+# --------------------------------------------------
+# Step 2: Show offer
+# --------------------------------------------------
 
-# Step 2: Show offer if available
 if st.session_state.offer and st.session_state.decision_made is None:
     approved = st.session_state.offer["approved_amount"]
     total_available = wallet_balance + approved
@@ -170,6 +178,17 @@ if st.session_state.offer and st.session_state.decision_made is None:
     st.success("✅ Credit offer available")
     st.markdown(f"**Approved advance:** ₦{approved:,}")
     st.markdown(f"**Total available for vend:** ₦{total_available:,}")
+
+    if approved == 2000:
+        st.info(
+            "This customer qualifies for a **starter / safety-limit advance** "
+            "while the system continues to learn their behaviour."
+        )
+
+    st.caption(
+        "Advance amounts vary continuously based on recent meter behaviour. "
+        "V0 prioritizes learning over aggressive risk filtering."
+    )
 
     col1, col2 = st.columns(2)
 
@@ -179,7 +198,6 @@ if st.session_state.offer and st.session_state.decision_made is None:
 
             st.session_state.decision_made = "ACCEPTED"
             st.session_state.vend_amount = vend_amount
-
             st.session_state.offer = None
 
     with col2:
@@ -187,8 +205,10 @@ if st.session_state.offer and st.session_state.decision_made is None:
             st.session_state.decision_made = "DECLINED"
             st.session_state.offer = None
 
+# --------------------------------------------------
+# Step 3: Final outcome
+# --------------------------------------------------
 
-# Step 3: Final outcome (very important)
 if st.session_state.decision_made == "ACCEPTED":
     st.info(f"⚡ Vend completed for ₦{st.session_state.vend_amount:,}")
     st.markdown("💰 **DisCo paid in full**")
@@ -197,4 +217,3 @@ if st.session_state.decision_made == "ACCEPTED":
 elif st.session_state.decision_made == "DECLINED":
     st.warning("Customer declined the credit offer.")
     st.markdown("No vend occurred. No risk taken.")
-

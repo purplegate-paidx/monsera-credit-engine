@@ -6,13 +6,13 @@ client = TestClient(app)
 
 def base_payload(**overrides):
     payload = {
-        "vend_count_last_60_days": 12,
-        "days_since_last_vend": 2,
+        "vend_count_last_60_days": 10,
+        "days_since_last_vend": 5,
         "vend_frequency": 3,
         "median_vend_amount": 4000,
         "vend_amount_volatility": 30,
-        "inter_vend_variance": 25,
-        "failed_vend_ratio": 5,
+        "inter_vend_variance": 20,
+        "failed_vend_ratio": 10,
         "has_active_obligation": False,
     }
     payload.update(overrides)
@@ -20,10 +20,10 @@ def base_payload(**overrides):
 
 
 # --------------------------------------------------
-# Successful decision scenarios
+# APPROVAL FLOWS
 # --------------------------------------------------
 
-def test_decision_endpoint_returns_approval():
+def test_decision_endpoint_approves_normal_user():
     response = client.post("/decision", json=base_payload())
     data = response.json()
 
@@ -32,7 +32,7 @@ def test_decision_endpoint_returns_approval():
     assert data["approved_amount"] >= 2000
 
 
-def test_low_history_user_gets_minimum_via_api():
+def test_low_history_user_approved_minimum():
     response = client.post(
         "/decision",
         json=base_payload(vend_count_last_60_days=1),
@@ -42,46 +42,45 @@ def test_low_history_user_gets_minimum_via_api():
 
     assert data["eligible"] is True
     assert data["approved_amount"] == 2000
-    assert data["reason"] == "STARTER_MIN_LIMIT"
 
 
-def test_high_volatility_user_still_gets_minimum_via_api():
+def test_high_friction_user_not_declined():
     response = client.post(
         "/decision",
-        json=base_payload(vend_amount_volatility=95),
+        json=base_payload(failed_vend_ratio=45),
     )
 
     data = response.json()
 
     assert data["eligible"] is True
-    assert data["approved_amount"] == 2000
+    assert data["approved_amount"] >= 2000
 
 
 # --------------------------------------------------
-# Hard declines
+# HARD DECLINES
 # --------------------------------------------------
 
-def test_api_rejects_active_obligation():
+def test_api_declines_extreme_failed_attempts():
     response = client.post(
         "/decision",
-        json=base_payload(has_active_obligation=True),
+        json=base_payload(failed_vend_ratio=80),
     )
 
     data = response.json()
 
     assert data["eligible"] is False
     assert data["approved_amount"] == 0
-    assert data["reason"] == "ACTIVE_OUTSTANDING_OBLIGATION"
+    assert data["reason"] == "EXTREME_FAILED_ATTEMPTS"
 
 
-def test_api_rejects_high_failed_attempts():
+def test_api_declines_long_dormant_meter():
     response = client.post(
         "/decision",
-        json=base_payload(failed_vend_ratio=35),
+        json=base_payload(days_since_last_vend=120),
     )
 
     data = response.json()
 
     assert data["eligible"] is False
     assert data["approved_amount"] == 0
-    assert data["reason"] == "HIGH_FAILED_ATTEMPTS"
+    assert data["reason"] == "LONG_TERM_DORMANT_METER"
