@@ -14,7 +14,13 @@ def determine_limit(
     """
     Returns:
         (approved_limit, band)
+
+    Policy:
+    - Eligible users never receive 0
+    - Weak / volatile users get minimum advance
     """
+
+    MIN_ADVANCE = 2000
 
     # Score bands
     if score >= 80:
@@ -30,15 +36,17 @@ def determine_limit(
         cap = 5000
         k = 0.5
     else:
-        return 0, "D"
+        # Weak behaviour → minimum advance, NOT zero
+        return MIN_ADVANCE, "D"
 
     base_limit = min(cap, int(k * median_vend_amount))
 
-    # Exposure adjustments
+    # Exposure adjustments (downward only)
     if vend_frequency < 2:
         base_limit = int(base_limit * 0.7)
 
     if vend_amount_volatility > 60:
         base_limit = int(base_limit * 0.7)
 
-    return max(base_limit, 2000), band
+    # Absolute floor enforcement (non-negotiable)
+    return max(base_limit, MIN_ADVANCE), band

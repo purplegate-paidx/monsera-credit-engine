@@ -10,6 +10,11 @@ from src.credit_engine.limit_engine import determine_limit
 def v0_decision(features: dict) -> dict:
     """
     End-to-end V0 decision.
+
+    Policy:
+    - Only risk causes decline
+    - Insufficient history → minimum advance
+    - Eligible users never receive 0
     """
 
     eligible, gate_reason = check_hard_gates(
@@ -26,6 +31,14 @@ def v0_decision(features: dict) -> dict:
             "approved_amount": 0,
         }
 
+    # Starter path (low history)
+    if features["vend_count_last_60_days"] < 3:
+        return {
+            "eligible": True,
+            "approved_amount": 2000,
+            "reason": "STARTER_MIN_LIMIT",
+        }
+
     score = compute_behaviour_score(
         vend_frequency=features["vend_frequency"],
         inter_vend_variance=features["inter_vend_variance"],
@@ -40,6 +53,10 @@ def v0_decision(features: dict) -> dict:
         vend_frequency=features["vend_frequency"],
         vend_amount_volatility=features["vend_amount_volatility"],
     )
+
+    # Final safety net (should never trigger now, but defensive)
+    if limit < 2000:
+        limit = 2000
 
     return {
         "eligible": True,

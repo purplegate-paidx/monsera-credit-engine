@@ -17,18 +17,19 @@ def check_hard_gates(
     """
     Returns:
         (is_eligible, reason_code)
+
+    Policy:
+    - Only high failed attempts or obligations cause decline
+    - Insufficient history does NOT cause decline
     """
 
     if has_active_obligation:
         return False, "ACTIVE_OUTSTANDING_OBLIGATION"
 
-    if vend_count_last_60_days < 6:
-        return False, "INSUFFICIENT_HISTORY"
+    if failed_vend_ratio >= 25:
+        return False, "HIGH_FAILED_ATTEMPTS"
 
     if days_since_last_vend > 30:
         return False, "DORMANT_METER"
-
-    if failed_vend_ratio >= 25:
-        return False, "HIGH_FAILED_ATTEMPTS"
 
     return True, None
