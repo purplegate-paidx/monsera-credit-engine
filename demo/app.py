@@ -14,11 +14,14 @@ st.subheader("Simulating prepaid electricity vending with behavioural credit")
 st.markdown(
     """
 This demo shows how Monsera enables **safe electricity advances**.
-The system approves an **amount**, not a forced vend.
-Customers can accept **full or partial power**, just like normal prepaid vending.
+
+• Monsera approves an **amount**, not a forced vend  
+• Wallet balance does **not** affect eligibility  
+• Customers may accept **full or partial power**  
+• DisCos are always paid upfront
 """
 )
-# Demo scenarios (behavioural profiles)
+# Behavioural scenarios
 
 SCENARIOS = {
     "Consistent Household": {
@@ -71,10 +74,14 @@ vend_price = st.number_input(
 
 st.markdown("---")
 
+# Vend simulation
+
 if st.button("Simulate Vend"):
+    st.session_state.clear()
+
     if wallet_balance >= vend_price:
         st.success("✅ Vend completed without credit.")
-        st.markdown("💰 DisCo paid in full.")
+        st.markdown("💰 **DisCo paid in full**")
     else:
         st.warning("⚠️ Insufficient balance. Aggregator requests Monsera decision…")
 
@@ -85,29 +92,34 @@ if st.button("Simulate Vend"):
             st.error("❌ Credit declined")
             st.markdown(f"**Reason:** {decision['reason']}")
         else:
-            approved = decision["approved_amount"]
+            st.session_state["decision"] = decision
+            st.session_state["show_offer"] = True
 
-            st.success("✅ Credit approved")
-            st.markdown(f"**Approved advance:** ₦{approved:,}")
+# Offer acceptance flow
 
-            total_available = wallet_balance + approved
+if st.session_state.get("show_offer"):
+    decision = st.session_state["decision"]
+    approved = decision["approved_amount"]
+    total_available = wallet_balance + approved
 
-            st.markdown(
-                f"""
-**Total available for vend:** ₦{total_available:,}
+    st.success("✅ Credit offer available")
+    st.markdown(f"**Approved advance:** ₦{approved:,}")
+    st.markdown(f"**Total available for vend:** ₦{total_available:,}")
 
-The customer can:
-- Proceed with a **partial vend**
-- Top up wallet and vend more
-- Decline the offer
-"""
-            )
+    col1, col2 = st.columns(2)
 
-            if total_available > 0:
-                vend_amount = min(total_available, vend_price)
+    with col1:
+        if st.button("✅ Accept Offer"):
+            vend_amount = min(total_available, vend_price)
 
-                st.info(f"⚡ **Vend completed for ₦{vend_amount:,}**")
-                st.markdown("💰 **DisCo paid in full for this vend**")
-                st.markdown("📅 **Repayment scheduled on next vend**")
-            else:
-                st.warning("Approved amount is zero. No vend possible.")
+            st.info(f"⚡ **Vend completed for ₦{vend_amount:,}**")
+            st.markdown("💰 **DisCo paid in full for this vend**")
+            st.markdown("📅 **Repayment scheduled on next vend**")
+
+            st.session_state.clear()
+
+    with col2:
+        if st.button("❌ Decline Offer"):
+            st.warning("Customer declined the credit offer.")
+            st.markdown("No vend occurred. No risk taken.")
+            st.session_state.clear()
