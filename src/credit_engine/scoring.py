@@ -7,7 +7,7 @@ from src.credit_engine.behaviour_score import compute_behaviour_score
 from src.credit_engine.limit_engine import determine_limit
 
 
-def v0_decision(features: dict) -> dict:
+def v0_decision(features: dict, exposure_multiplier: float = 1.0) -> dict:
     eligible, reason = check_hard_gates(
         failed_vend_ratio=features["failed_vend_ratio"],
         days_since_last_vend=features["days_since_last_vend"],
@@ -34,6 +34,7 @@ def v0_decision(features: dict) -> dict:
         score=score,
         median_vend_amount=features["median_vend_amount"],
         vend_count_last_60_days=features["vend_count_last_60_days"],
+        exposure_multiplier=exposure_multiplier,
     )
 
     return {

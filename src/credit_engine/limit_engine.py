@@ -6,6 +6,7 @@ def determine_limit(
     score: int,
     median_vend_amount: float,
     vend_count_last_60_days: int,
+    exposure_multiplier: float = 1.0,
 ) -> int:
     """
     Continuous limit sizing for V0.
@@ -27,6 +28,9 @@ def determine_limit(
     confidence = 0.1 + (score / 100) * 0.5
 
     raw_limit = confidence * median_vend_amount
+
+    # Apply scenario aggressiveness
+    raw_limit = raw_limit * exposure_multiplier
 
     approved = int(raw_limit)
 
