@@ -9,3 +9,22 @@ def clamp(value: float, min_value: float = 0, max_value: float = 100) -> float:
     Used to ensure credit scores remain within valid bounds.
     """
     return max(min_value, min(value, max_value))
+
+
+APPROVED_BANDS = [
+    2000,
+    3000,
+    5000,
+    7500,
+    10000,
+    15000,
+    20000,
+]
+
+
+def round_to_nearest_band(amount: int) -> int:
+    """
+    Rounds a raw approved amount to the nearest permitted band.
+    """
+    return min(APPROVED_BANDS, key=lambda x: abs(x - amount))
+

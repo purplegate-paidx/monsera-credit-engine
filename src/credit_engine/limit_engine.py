@@ -1,6 +1,7 @@
 """
 Credit limit sizing logic for V0 model.
 """
+from src.credit_engine.utils import round_to_nearest_band
 
 def determine_limit(
     score: int,
@@ -37,5 +38,8 @@ def determine_limit(
     # Enforce absolute bounds
     approved = max(approved, MIN_ADVANCE)
     approved = min(approved, MAX_ADVANCE)
+
+    # Round to nearest approved band
+    approved = round_to_nearest_band(approved)
 
     return approved

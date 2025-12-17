@@ -6,16 +6,25 @@ from datetime import timedelta
 API_URL = "https://monsera-credit-engine.onrender.com/decision"
 SUCCESS_STATUSES = {"SUCCESS", "COMPLETED", "SUCCESSFUL"}
 
-st.set_page_config(page_title="Monsera Aggregator Demo", layout="wide")
-
-st.title("⚡ Monsera Aggregator Console (V0 Demo)")
-st.caption(
-    "Behavioural credit for prepaid electricity • "
-    "Learning-first • DisCo-safe • Meter-enforced"
+st.set_page_config(
+    page_title="Monsera Aggregator Console",
+    layout="wide",
 )
 
 # --------------------------------------------------
-# Load data (cached for speed)
+# Header
+# --------------------------------------------------
+
+st.markdown("## ⚡ Monsera Aggregator Console")
+st.caption(
+    "Behavioural credit for prepaid electricity • "
+    "Learning-first • Meter-enforced • DisCo-safe"
+)
+
+st.divider()
+
+# --------------------------------------------------
+# Load data
 # --------------------------------------------------
 
 @st.cache_data
@@ -27,32 +36,44 @@ def load_data():
 df = load_data()
 
 # --------------------------------------------------
-# Meter (User_ID) selection
+# Meter selection (state reset happens here)
 # --------------------------------------------------
 
-users = (
+meters = (
     df[["User_ID", "Service_Provider"]]
     .drop_duplicates()
     .sort_values("User_ID")
 )
 
-selected_user = st.selectbox(
+selected_meter = st.selectbox(
     "Select Meter (User ID)",
-    users["User_ID"].tolist()
+    meters["User_ID"].tolist(),
 )
 
-user_df = df[df["User_ID"] == selected_user].sort_values("Transaction_Date")
+# Reset state when meter changes
+if st.session_state.get("current_meter") != selected_meter:
+    st.session_state.current_meter = selected_meter
+    st.session_state.offer = None
+    st.session_state.decision_made = None
+    st.session_state.vend_amount = None
 
-service_provider = user_df["Service_Provider"].iloc[0]
-st.markdown(f"**Service Provider:** `{service_provider}`")
+meter_df = df[df["User_ID"] == selected_meter].sort_values("Transaction_Date")
+service_provider = meter_df["Service_Provider"].iloc[0]
+
+st.markdown(
+    f"**Service Provider:** `{service_provider}`"
+)
+
+st.divider()
 
 # --------------------------------------------------
-# Show last 5 transactions
+# Last transactions
 # --------------------------------------------------
 
-st.markdown("### Last 5 Transactions")
+st.markdown("### Recent Activity (Last 5 Transactions)")
+
 st.dataframe(
-    user_df.tail(5)[
+    meter_df.tail(5)[
         [
             "Transaction_Date",
             "Amount",
@@ -65,43 +86,33 @@ st.dataframe(
 )
 
 # --------------------------------------------------
-# Feature engineering (V0 – last 60 days)
+# Feature engineering (last 60 days)
 # --------------------------------------------------
 
-today = user_df["Transaction_Date"].max()
+today = meter_df["Transaction_Date"].max()
 window_start = today - timedelta(days=60)
 
-recent = user_df[user_df["Transaction_Date"] >= window_start]
+recent = meter_df[meter_df["Transaction_Date"] >= window_start]
 successful = recent[recent["Status"].isin(SUCCESS_STATUSES)]
 
 vend_count = len(successful)
 total_attempts = len(recent)
 
-failed_vend_ratio = (
+failed_ratio = (
     100 * (total_attempts - vend_count) / total_attempts
     if total_attempts > 0
     else 100
 )
 
-median_vend = successful["Amount"].median() if vend_count > 0 else 0
+median_vend = successful["Amount"].median() if vend_count else 0
 
-vend_amount_volatility = (
+volatility = (
     successful["Amount"].std() / median_vend * 100
     if vend_count > 1 and median_vend > 0
     else 0
 )
 
-inter_vend_variance = (
-    successful["Transaction_Date"]
-    .sort_values()
-    .diff()
-    .dt.days
-    .var()
-    if vend_count > 2
-    else 0
-)
-
-days_since_last_vend = (
+days_since_last = (
     (today - successful["Transaction_Date"].max()).days
     if vend_count > 0
     else 999
@@ -109,133 +120,141 @@ days_since_last_vend = (
 
 features = {
     "vend_count_last_60_days": int(vend_count),
-    "days_since_last_vend": int(days_since_last_vend),
+    "days_since_last_vend": int(days_since_last),
     "vend_frequency": float(vend_count / 2),
     "median_vend_amount": float(median_vend),
-    "vend_amount_volatility": float(vend_amount_volatility),
-    "inter_vend_variance": float(inter_vend_variance),
-    "failed_vend_ratio": float(failed_vend_ratio),
+    "vend_amount_volatility": float(volatility),
+    "inter_vend_variance": 0,
+    "failed_vend_ratio": float(failed_ratio),
     "has_active_obligation": False,
 }
 
 # --------------------------------------------------
-# Behaviour summary
+# Behaviour summary (human-readable)
 # --------------------------------------------------
 
-st.markdown("### Behaviour Summary (Derived)")
-st.json(features)
+st.markdown("### Behaviour Summary")
+
+col1, col2, col3, col4 = st.columns(4)
+
+col1.metric("Vends (60d)", vend_count)
+col2.metric("Median Vend (₦)", f"{int(median_vend):,}")
+col3.metric("Failed Attempts (%)", f"{failed_ratio:.1f}%")
+col4.metric("Days Since Last Vend", days_since_last)
+
+st.divider()
 
 # --------------------------------------------------
-# Vend simulation (stateful)
+# Vend simulation
 # --------------------------------------------------
 
 st.markdown("### Vend Simulation")
 
-wallet_balance = st.number_input(
-    "Wallet balance (₦)", min_value=0, value=0, step=500
-)
+left, right = st.columns(2)
 
-vend_request = st.number_input(
-    "Electricity requested (₦)", min_value=1000, value=4000, step=500
-)
+with left:
+    wallet_balance = st.number_input(
+        "Wallet Balance (₦)",
+        min_value=0,
+        value=0,
+        step=500,
+    )
 
-# Session state
-if "offer" not in st.session_state:
-    st.session_state.offer = None
+with right:
+    vend_request = st.number_input(
+        "Electricity Requested (₦)",
+        min_value=1000,
+        value=4000,
+        step=500,
+    )
 
-if "decision_made" not in st.session_state:
-    st.session_state.decision_made = None
+# Initialize state
+st.session_state.setdefault("offer", None)
+st.session_state.setdefault("decision_made", None)
 
 # --------------------------------------------------
-# Step 1: Request decision
+# Request decision
 # --------------------------------------------------
 
-if st.button("Simulate Vend"):
+if st.button("Simulate Vend", use_container_width=True):
     with st.spinner("Contacting Monsera decision engine..."):
         try:
             response = requests.post(
                 API_URL,
                 json=features,
-                timeout=30,  # allow for cold start
+                timeout=30,
             )
             response.raise_for_status()
             decision = response.json()
 
-        except requests.exceptions.ReadTimeout:
-            st.error(
-                "The decision engine is waking up (cold start). "
-                "Please click **Simulate Vend** again in a few seconds."
-            )
-            st.stop()
-
         except requests.exceptions.RequestException:
             st.error(
-                "Unable to reach the decision engine at the moment. "
-                "This does not affect the demo logic."
+                "Decision engine is temporarily unavailable. "
+                "Please try again."
             )
             st.stop()
-
 
     if not decision["eligible"]:
         st.session_state.offer = None
         st.session_state.decision_made = "DECLINED"
 
         st.error("❌ Credit declined (extreme risk detected)")
-        st.markdown(
-            "Declines at V0 occur **only** in cases of extreme abuse, "
-            "long-term inactivity, or unpaid obligations."
+        st.caption(
+            "Declines at V0 occur only in cases of extreme abuse "
+            "or long-term inactivity."
         )
     else:
         st.session_state.offer = decision
         st.session_state.decision_made = None
 
 # --------------------------------------------------
-# Step 2: Show offer
+# Offer display
 # --------------------------------------------------
 
 if st.session_state.offer and st.session_state.decision_made is None:
     approved = st.session_state.offer["approved_amount"]
     total_available = wallet_balance + approved
 
-    st.success("✅ Credit offer available")
-    st.markdown(f"**Approved advance:** ₦{approved:,}")
-    st.markdown(f"**Total available for vend:** ₦{total_available:,}")
+    st.success("✅ Credit Offer Available")
+    st.markdown(f"**Approved Advance:** ₦{approved:,}")
+    st.markdown(f"**Total Available for Vend:** ₦{total_available:,}")
 
     if approved == 2000:
         st.info(
-            "This customer qualifies for a **starter / safety-limit advance** "
-            "while the system continues to learn their behaviour."
+            "Starter / safety-limit advance applied "
+            "while the system continues to learn."
         )
 
     st.caption(
-        "Advance amounts vary continuously based on recent meter behaviour. "
-        "V0 prioritizes learning over aggressive risk filtering."
+        "Advance amounts vary continuously based on recent meter behaviour."
     )
 
-    col1, col2 = st.columns(2)
+    c1, c2 = st.columns(2)
 
-    with col1:
-        if st.button("✅ Accept Offer"):
-            vend_amount = min(vend_request, total_available)
-
+    with c1:
+        if st.button("✅ Accept Offer", use_container_width=True):
             st.session_state.decision_made = "ACCEPTED"
-            st.session_state.vend_amount = vend_amount
+            st.session_state.vend_amount = min(
+                vend_request, total_available
+            )
             st.session_state.offer = None
 
-    with col2:
-        if st.button("❌ Decline Offer"):
+    with c2:
+        if st.button("❌ Decline Offer", use_container_width=True):
             st.session_state.decision_made = "DECLINED"
             st.session_state.offer = None
 
 # --------------------------------------------------
-# Step 3: Final outcome
+# Final outcome
 # --------------------------------------------------
 
 if st.session_state.decision_made == "ACCEPTED":
-    st.info(f"⚡ Vend completed for ₦{st.session_state.vend_amount:,}")
+    st.success(
+        f"⚡ Vend completed for ₦{st.session_state.vend_amount:,}"
+    )
     st.markdown("💰 **DisCo paid in full**")
     st.markdown("📅 **Repayment scheduled on next vend**")
 
 elif st.session_state.decision_made == "DECLINED":
     st.warning("Customer declined the credit offer.")
-    st.markdown("No vend occurred. No risk taken.")
+    st.caption("No vend occurred. No risk taken.")
