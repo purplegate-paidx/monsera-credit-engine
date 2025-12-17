@@ -151,8 +151,30 @@ if "decision_made" not in st.session_state:
 # --------------------------------------------------
 
 if st.button("Simulate Vend"):
-    response = requests.post(API_URL, json=features, timeout=5)
-    decision = response.json()
+    with st.spinner("Contacting Monsera decision engine..."):
+        try:
+            response = requests.post(
+                API_URL,
+                json=features,
+                timeout=30,  # allow for cold start
+            )
+            response.raise_for_status()
+            decision = response.json()
+
+        except requests.exceptions.ReadTimeout:
+            st.error(
+                "The decision engine is waking up (cold start). "
+                "Please click **Simulate Vend** again in a few seconds."
+            )
+            st.stop()
+
+        except requests.exceptions.RequestException:
+            st.error(
+                "Unable to reach the decision engine at the moment. "
+                "This does not affect the demo logic."
+            )
+            st.stop()
+
 
     if not decision["eligible"]:
         st.session_state.offer = None
