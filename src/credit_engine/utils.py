@@ -28,3 +28,10 @@ def round_to_nearest_band(amount: int) -> int:
     """
     return min(APPROVED_BANDS, key=lambda x: abs(x - amount))
 
+
+def round_to_step(amount: int, step: int = 1000) -> int:
+    """
+    Rounds amount to the nearest step (e.g. ₦1,000).
+    """
+    return int(round(amount / step) * step)
+
