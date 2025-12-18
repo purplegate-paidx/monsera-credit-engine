@@ -8,6 +8,7 @@ Principles:
 """
 
 from src.credit_engine.config import MIN_ADVANCE, MAX_ADVANCE
+from src.credit_engine.utils import round_to_step
 
 BAND_CAPS = {
     "A": 20000,
@@ -54,7 +55,7 @@ def determine_limit(features: dict, score: int, band: str) -> int:
     base_limit *= _volatility_dampener(features["vend_amount_volatility"])
     base_limit *= _variance_dampener(features["inter_vend_variance"])
 
-    approved = int(base_limit)
+    approved = round_to_step(base_limit, step=500)
 
     # Apply band cap FIRST
     band_cap = BAND_CAPS.get(band, MIN_ADVANCE)
