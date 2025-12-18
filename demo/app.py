@@ -209,6 +209,9 @@ if st.session_state.offer and st.session_state.decision_made is None:
     # Choose final vend amount
     # --------------------------------------------------
 
+    # Default: cap requested amount to what is actually possible
+    final_vend_amount = min(vend_request, total_available)
+
     if approved > vend_request:
         st.markdown("### Confirm Vend Amount")
 
@@ -221,14 +224,11 @@ if st.session_state.offer and st.session_state.decision_made is None:
             final_vend_amount = st.slider(
                 "Select vend amount (₦)",
                 min_value=vend_request,
-                max_value=approved,
+                max_value=min(approved, total_available),
                 step=500,
-                value=vend_request,
+                value=final_vend_amount,
             )
-        else:
-            final_vend_amount = vend_request
-    else:
-        final_vend_amount = vend_request
+
 
     # --------------------------------------------------
     # Repayment preview (NEW)
