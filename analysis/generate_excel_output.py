@@ -3,124 +3,152 @@ from datetime import timedelta
 
 from src.credit_engine.scoring import v0_decision
 
-# --------------------------------------------------
-# Scenario definitions
-# --------------------------------------------------
+# ---------------------------------------------
+# Configuration
+# ---------------------------------------------
+
+SUCCESS_STATUSES = {"SUCCESS", "COMPLETED"}
 
 SCENARIOS = {
-    "Scenario_Conservative": {
+    "Conservative": {
         "max_failed_ratio": 50,
         "max_dormancy_days": 60,
-        "exposure_multiplier": 0.6,
     },
-    "Scenario_Balanced": {
+    "Balanced": {
         "max_failed_ratio": 70,
         "max_dormancy_days": 90,
-        "exposure_multiplier": 1.0,
     },
-    "Scenario_Learning_Heavy": {
+    "Learning_Heavy": {
         "max_failed_ratio": 85,
         "max_dormancy_days": 120,
-        "exposure_multiplier": 1.3,
     },
 }
 
-SUCCESS_STATUSES = {"SUCCESS", "COMPLETED", "SUCCESSFUL"}
+INPUT_PATH = "demo/data/consolidated_transactions.csv"
+OUTPUT_PATH = "Monsera_V0_Scenario_Results.xlsx"
 
-# --------------------------------------------------
+# ---------------------------------------------
 # Load data
-# --------------------------------------------------
+# ---------------------------------------------
 
-df = pd.read_csv("demo/data/consolidated_transactions.csv")
+df = pd.read_csv(INPUT_PATH)
 df["Transaction_Date"] = pd.to_datetime(df["Transaction_Date"])
 
 today = df["Transaction_Date"].max()
+scenario_results = {name: [] for name in SCENARIOS}
 
-# --------------------------------------------------
-# Prepare Excel writer
-# --------------------------------------------------
+# ---------------------------------------------
+# Feature engineering per user
+# ---------------------------------------------
 
-writer = pd.ExcelWriter(
-    "Monsera_V0_Scenario_Results.xlsx",
-    engine="xlsxwriter"
-)
+for user_id, user_df in df.groupby("User_ID"):
+    user_df = user_df.sort_values("Transaction_Date")
 
-# --------------------------------------------------
-# Generate one sheet per scenario
-# --------------------------------------------------
+    window_start = today - timedelta(days=60)
+    recent = user_df[user_df["Transaction_Date"] >= window_start]
+    successful = recent[recent["Status"].isin(SUCCESS_STATUSES)]
 
-for scenario_name, rules in SCENARIOS.items():
-    rows = []
+    vend_count = len(successful)
+    total_attempts = len(recent)
 
-    for user_id, user_df in df.groupby("User_ID"):
-        user_df = user_df.sort_values("Transaction_Date")
+    failed_ratio = (
+        100 * (total_attempts - vend_count) / total_attempts
+        if total_attempts > 0
+        else 100
+    )
 
-        window_start = today - timedelta(days=60)
-        recent = user_df[user_df["Transaction_Date"] >= window_start]
-        successful = recent[recent["Status"].isin(SUCCESS_STATUSES)]
+    median_vend = successful["Amount"].median() if vend_count else 0
 
-        vend_count = len(successful)
-        total_attempts = len(recent)
+    vend_amount_volatility = (
+        successful["Amount"].std() / median_vend * 100
+        if vend_count > 1 and median_vend > 0
+        else 0
+    )
 
-        failed_ratio = (
-            100 * (total_attempts - vend_count) / total_attempts
-            if total_attempts > 0
-            else 100
-        )
+    inter_vend_variance = (
+        successful["Transaction_Date"]
+        .diff()
+        .dt.days
+        .var()
+        if vend_count > 2
+        else 0
+    )
 
-        median_vend = successful["Amount"].median() if vend_count else 0
+    days_since_last = (
+        (today - successful["Transaction_Date"].max()).days
+        if vend_count
+        else 999
+    )
 
-        volatility = (
-            successful["Amount"].std() / median_vend * 100
-            if vend_count > 1 and median_vend > 0
-            else 0
-        )
+    base_features = {
+        "vend_count_last_60_days": int(vend_count),
+        "days_since_last_vend": int(days_since_last),
+        "vend_frequency": float(vend_count / 2),  # informational only
+        "median_vend_amount": float(median_vend),
+        "vend_amount_volatility": float(vend_amount_volatility),
+        "inter_vend_variance": float(inter_vend_variance),
+        "failed_vend_ratio": float(failed_ratio),
+        "has_active_obligation": False,
+    }
 
-        days_since_last = (
-            (today - successful["Transaction_Date"].max()).days
-            if vend_count > 0
-            else 999
-        )
+    service_provider = user_df["Service_Provider"].iloc[0]
 
-        # Apply scenario soft caps
-        adjusted_failed_ratio = min(
-            failed_ratio,
+    # ---------------------------------------------
+    # Scenario evaluation
+    # ---------------------------------------------
+
+    for scenario, rules in SCENARIOS.items():
+        features = base_features.copy()
+
+        # Scenario tolerance (policy overlay, not model rewrite)
+        features["failed_vend_ratio"] = min(
+            features["failed_vend_ratio"],
             rules["max_failed_ratio"],
         )
-
-        adjusted_days_since_last = min(
-            days_since_last,
+        features["days_since_last_vend"] = min(
+            features["days_since_last_vend"],
             rules["max_dormancy_days"],
         )
 
-        features = {
-            "vend_count_last_60_days": vend_count,
-            "days_since_last_vend": adjusted_days_since_last,
-            "vend_frequency": vend_count / 2,
-            "median_vend_amount": median_vend,
-            "vend_amount_volatility": volatility,
-            "inter_vend_variance": 0,
-            "failed_vend_ratio": adjusted_failed_ratio,
-            "has_active_obligation": False,
-        }
-
         decision = v0_decision(features)
 
-        rows.append({
+        scenario_results[scenario].append({
             "User_ID": user_id,
-            "Service_Provider": user_df["Service_Provider"].iloc[0],
-            "eligible": decision.get("eligible"),
-            "approved_amount": decision.get("approved_amount"),
-            "reason": decision.get("reason", "APPROVED"),
+            "Service_Provider": service_provider,
+
+            # Decision outputs (authoritative)
+            "eligible": decision["eligible"],
+            "band": decision["band"],
+            "score": decision["score"],
+            "approved_amount": decision["approved_amount"],
+            "reason": decision["reason"],
+
+            # Core behavioural inputs
             "vend_count_last_60_days": vend_count,
-            "failed_vend_ratio": failed_ratio,
             "median_vend_amount": median_vend,
-            "days_since_last_vend": days_since_last,
+            "vend_amount_volatility": vend_amount_volatility,
+            "inter_vend_variance": inter_vend_variance,
+            "failed_vend_ratio_observed": failed_ratio,
+            "days_since_last_vend_observed": days_since_last,
+
+            # Scenario-adjusted inputs (explicit)
+            "scenario_failed_ratio_used": features["failed_vend_ratio"],
+            "scenario_days_since_last_vend_used": features["days_since_last_vend"],
         })
 
-    scenario_df = pd.DataFrame(rows)
-    scenario_df.to_excel(writer, sheet_name=scenario_name, index=False)
+# ---------------------------------------------
+# Write Excel output
+# ---------------------------------------------
 
-writer.close()
+with pd.ExcelWriter(
+    OUTPUT_PATH,
+    engine="xlsxwriter"
+) as writer:
+    for scenario, rows in scenario_results.items():
+        pd.DataFrame(rows).to_excel(
+            writer,
+            sheet_name=scenario,
+            index=False,
+        )
 
-print("Excel output generated: Monsera_V0_Scenario_Results.xlsx")
+print(f"✅ Excel output generated: {OUTPUT_PATH}")

@@ -1,52 +1,27 @@
 """
-Behavioural scoring logic for V0 model.
-Produces a score between 0 and 100.
+Behaviour score = trust / engagement signal.
+Does NOT measure smoothness.
 """
 
-def compute_behaviour_score(
-    vend_count_last_60_days: int,
-    vend_frequency: float,
-    median_vend_amount: float,
-    vend_amount_volatility: float,
-    failed_vend_ratio: float,
-    days_since_last_vend: int,
-) -> int:
-    """
-    Produces a 0–100 confidence score.
-    Used only for limit scaling, not hard eligibility.
-    """
+def compute_behaviour_score(features: dict) -> int:
+    score = 50  # neutral baseline
 
-    score = 50  # neutral starting point
-
-    # Engagement
-    score += min(vend_count_last_60_days * 3, 20)
-
-    # Capacity proxy
-    if median_vend_amount >= 6000:
-        score += 15
-    elif median_vend_amount >= 3000:
+    # Activity
+    if features["vend_count_last_60_days"] >= 10:
+        score += 20
+    elif features["vend_count_last_60_days"] >= 5:
         score += 10
-    else:
+
+    # Recency
+    if features["days_since_last_vend"] <= 7:
+        score += 15
+    elif features["days_since_last_vend"] <= 30:
         score += 5
 
-    # Volatility penalty
-    if vend_amount_volatility > 80:
-        score -= 25
-    elif vend_amount_volatility > 50:
-        score -= 15
-    elif vend_amount_volatility > 30:
-        score -= 8
-
-    # Failed attempts penalty (soft)
-    if failed_vend_ratio > 40:
+    # Failed vends (only meaningful degradation)
+    if features["failed_vend_ratio"] >= 50:
         score -= 20
-    elif failed_vend_ratio > 20:
+    elif features["failed_vend_ratio"] >= 30:
         score -= 10
 
-    # Dormancy penalty (soft)
-    if days_since_last_vend > 60:
-        score -= 20
-    elif days_since_last_vend > 30:
-        score -= 10
-
-    return max(0, min(score, 100))
+    return max(0, min(100, score))

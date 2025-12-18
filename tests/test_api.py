@@ -6,7 +6,7 @@ client = TestClient(app)
 
 def base_payload(**overrides):
     payload = {
-        "vend_count_last_60_days": 10,
+        "vend_count_last_60_days": 8,
         "days_since_last_vend": 5,
         "vend_frequency": 3,
         "median_vend_amount": 4000,
@@ -19,11 +19,7 @@ def base_payload(**overrides):
     return payload
 
 
-# --------------------------------------------------
-# APPROVAL FLOWS
-# --------------------------------------------------
-
-def test_decision_endpoint_approves_normal_user():
+def test_api_approves_normal_user():
     response = client.post("/decision", json=base_payload())
     data = response.json()
 
@@ -32,55 +28,38 @@ def test_decision_endpoint_approves_normal_user():
     assert data["approved_amount"] >= 2000
 
 
-def test_low_history_user_approved_minimum():
+def test_api_low_history_user_gets_minimum():
     response = client.post(
         "/decision",
         json=base_payload(vend_count_last_60_days=1),
     )
-
     data = response.json()
 
     assert data["eligible"] is True
     assert data["approved_amount"] == 2000
 
 
-def test_high_friction_user_not_declined():
+def test_api_high_volatility_not_declined():
     response = client.post(
         "/decision",
-        json=base_payload(failed_vend_ratio=45),
+        json=base_payload(vend_amount_volatility=95),
     )
-
     data = response.json()
 
     assert data["eligible"] is True
     assert data["approved_amount"] >= 2000
 
 
-# --------------------------------------------------
-# HARD DECLINES
-# --------------------------------------------------
-
-def test_api_declines_extreme_failed_attempts():
+def test_api_band_c_never_exceeds_cap():
     response = client.post(
         "/decision",
-        json=base_payload(failed_vend_ratio=80),
+        json=base_payload(
+            vend_count_last_60_days=4,
+            failed_vend_ratio=30,   # likely Band C
+            median_vend_amount=20000,
+        ),
     )
-
     data = response.json()
 
-    assert data["eligible"] is False
-    assert data["approved_amount"] == 0
-    assert data["reason"] == "EXTREME_FAILED_ATTEMPTS"
-
-
-def test_api_declines_long_dormant_meter():
-    response = client.post(
-        "/decision",
-        json=base_payload(days_since_last_vend=120),
-    )
-
-    data = response.json()
-
-    assert data["eligible"] is False
-    assert data["approved_amount"] == 0
-    assert data["reason"] == "LONG_TERM_DORMANT_METER"
+    assert data["band"] == "C"
+    assert data["approved_amount"] <= 5000

@@ -1,35 +1,26 @@
 """
-Hard eligibility gates for V0 credit model.
-
-These rules are enforced BEFORE scoring.
-If any gate fails, the meter is ineligible.
+Hard gates are ONLY for extreme, system-abusive cases.
+They should be rare.
 """
 
-from typing import Tuple
+from src.credit_engine.config import (
+    MAX_FAILED_VEND_RATIO,
+    MAX_DORMANCY_DAYS,
+)
 
 
-def check_hard_gates(
-    failed_vend_ratio: float,
-    days_since_last_vend: int,
-    has_active_obligation: bool,
-) -> Tuple[bool, str | None]:
+def check_hard_gates(features: dict) -> tuple[bool, str | None]:
     """
-    HARD gates for V0.
-
-    Philosophy:
-    - V0 is a learning model, not a bank
-    - Only extreme cases should be declined
+    Returns (blocked, reason)
     """
 
-    if has_active_obligation:
-        return False, "ACTIVE_OUTSTANDING_OBLIGATION"
+    if features.get("has_active_obligation"):
+        return True, "ACTIVE_OBLIGATION"
 
-    # Extreme friction / abuse only
-    if failed_vend_ratio >= 70:
-        return False, "EXTREME_FAILED_ATTEMPTS"
+    if features["failed_vend_ratio"] >= MAX_FAILED_VEND_RATIO:
+        return True, "EXTREME_FAILED_ATTEMPTS"
 
-    # Truly inactive meter
-    if days_since_last_vend > 90:
-        return False, "LONG_TERM_DORMANT_METER"
+    if features["days_since_last_vend"] > MAX_DORMANCY_DAYS:
+        return True, "LONG_DORMANCY"
 
-    return True, None
+    return False, None

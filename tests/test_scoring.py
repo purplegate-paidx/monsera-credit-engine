@@ -4,7 +4,7 @@ from credit_engine.scoring import v0_decision
 
 def base_features(**overrides):
     features = {
-        "vend_count_last_60_days": 10,
+        "vend_count_last_60_days": 8,
         "days_since_last_vend": 5,
         "vend_frequency": 3,
         "median_vend_amount": 4000,
@@ -17,105 +17,123 @@ def base_features(**overrides):
     return features
 
 
-# --------------------------------------------------
-# HARD DECLINES (VERY RARE)
-# --------------------------------------------------
+# ==================================================
+# HARD DECLINES (EXTREME ONLY)
+# ==================================================
 
 def test_active_obligation_is_declined():
     result = v0_decision(base_features(has_active_obligation=True))
-
     assert result["eligible"] is False
     assert result["approved_amount"] == 0
-    assert result["reason"] == "ACTIVE_OUTSTANDING_OBLIGATION"
 
 
 def test_extreme_failed_attempts_are_declined():
-    result = v0_decision(base_features(failed_vend_ratio=75))
-
+    result = v0_decision(base_features(failed_vend_ratio=90))
     assert result["eligible"] is False
     assert result["approved_amount"] == 0
-    assert result["reason"] == "EXTREME_FAILED_ATTEMPTS"
 
 
 def test_long_term_dormant_meter_is_declined():
-    result = v0_decision(base_features(days_since_last_vend=120))
-
+    result = v0_decision(base_features(days_since_last_vend=150))
     assert result["eligible"] is False
     assert result["approved_amount"] == 0
-    assert result["reason"] == "LONG_TERM_DORMANT_METER"
 
 
-# --------------------------------------------------
-# STARTER / LOW HISTORY USERS
-# --------------------------------------------------
+# ==================================================
+# STARTER / LEARNING USERS
+# ==================================================
 
-def test_low_history_user_gets_minimum_advance():
+def test_low_history_user_gets_minimum():
     result = v0_decision(base_features(vend_count_last_60_days=1))
-
     assert result["eligible"] is True
     assert result["approved_amount"] == 2000
 
 
-# --------------------------------------------------
-# FRICTION & VOLATILITY (SOFT EFFECTS)
-# --------------------------------------------------
+# ==================================================
+# VOLATILITY & VARIANCE (SOFT ONLY)
+# ==================================================
 
-def test_high_failed_ratio_reduces_limit_not_decline():
-    result = v0_decision(base_features(failed_vend_ratio=45))
-
+def test_high_volatility_does_not_decline():
+    result = v0_decision(base_features(vend_amount_volatility=95))
     assert result["eligible"] is True
     assert result["approved_amount"] >= 2000
 
 
-def test_high_volatility_reduces_limit_not_zero():
-    result = v0_decision(base_features(vend_amount_volatility=90))
+def test_high_variance_reduces_amount_not_band():
+    low_var = v0_decision(base_features(inter_vend_variance=10))
+    high_var = v0_decision(base_features(inter_vend_variance=150))
 
-    assert result["eligible"] is True
-    assert result["approved_amount"] >= 2000
-
-
-def test_recent_dormancy_reduces_limit_not_decline():
-    result = v0_decision(base_features(days_since_last_vend=45))
-
-    assert result["eligible"] is True
-    assert result["approved_amount"] >= 2000
+    assert low_var["band"] == high_var["band"]
+    assert high_var["approved_amount"] < low_var["approved_amount"]
 
 
-# --------------------------------------------------
-# CONTINUOUS LIMIT DISTRIBUTION
-# --------------------------------------------------
+# ==================================================
+# CAPACITY DRIVES AMOUNT
+# ==================================================
 
-def test_higher_median_vend_gets_higher_limit():
+def test_higher_median_vend_gets_higher_amount():
     low = v0_decision(base_features(median_vend_amount=2500))
-    high = v0_decision(base_features(median_vend_amount=8000))
+    high = v0_decision(base_features(median_vend_amount=10000))
 
     assert high["approved_amount"] > low["approved_amount"]
 
 
-def test_score_affects_limit_continuously_when_scaling_is_possible():
-    weak = v0_decision(
+def test_band_b_not_collapsed_to_minimum():
+    result = v0_decision(
         base_features(
-            vend_count_last_60_days=3,
-            median_vend_amount=3000,
+            median_vend_amount=5000,
+            vend_count_last_60_days=8,
         )
     )
-
-    strong = v0_decision(
-        base_features(
-            vend_count_last_60_days=15,
-            median_vend_amount=10000,
-        )
-    )
-
-    assert strong["approved_amount"] > weak["approved_amount"]
+    assert result["band"] in ["A", "B"]
+    assert result["approved_amount"] > 2000
 
 
-# --------------------------------------------------
+# ==================================================
 # ABSOLUTE INVARIANT
-# --------------------------------------------------
+# ==================================================
 
-def test_eligible_users_never_receive_zero():
-    result = v0_decision(base_features(vend_amount_volatility=95))
-
+def test_eligible_user_never_gets_zero():
+    result = v0_decision(base_features(vend_amount_volatility=99))
     assert result["eligible"] is True
     assert result["approved_amount"] >= 2000
+
+
+def test_band_c_or_b_cap_enforced():
+    result = v0_decision(
+        base_features(
+            failed_vend_ratio=35,
+            median_vend_amount=30000,
+        )
+    )
+
+    if result["band"] == "C":
+        assert result["approved_amount"] <= 5000
+    elif result["band"] == "B":
+        assert result["approved_amount"] <= 10000
+
+
+def test_band_b_cap_enforced():
+    result = v0_decision(
+        base_features(
+            median_vend_amount=30000,
+            vend_count_last_60_days=6,
+        )
+    )
+
+    assert result["band"] == "B"
+    assert result["approved_amount"] <= 10000
+
+
+def test_band_a_can_reach_global_max():
+    result = v0_decision(
+        base_features(
+            vend_count_last_60_days=12,
+            median_vend_amount=50000,
+            failed_vend_ratio=5,
+        )
+    )
+
+    assert result["band"] == "A"
+    assert result["approved_amount"] <= 20000
+

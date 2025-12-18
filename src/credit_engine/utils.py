@@ -2,6 +2,9 @@
 Utility helper functions shared across the credit engine.
 """
 
+from altair import value
+
+
 def clamp(value: float, min_value: float = 0, max_value: float = 100) -> float:
     """
     Clamp a numeric value between min_value and max_value.
@@ -29,9 +32,9 @@ def round_to_nearest_band(amount: int) -> int:
     return min(APPROVED_BANDS, key=lambda x: abs(x - amount))
 
 
-def round_to_step(amount: int, step: int = 1000) -> int:
+def round_to_step(amount: int, step: int = 500) -> int:
     """
-    Rounds amount to the nearest step (e.g. ₦1,000).
+    Rounds amount to the nearest step (e.g. ₦500).
     """
     return int(round(amount / step) * step)
 

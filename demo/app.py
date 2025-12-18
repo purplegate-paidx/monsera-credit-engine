@@ -36,7 +36,7 @@ def load_data():
 df = load_data()
 
 # --------------------------------------------------
-# Meter selection (state reset happens here)
+# Meter selection (reset state on change)
 # --------------------------------------------------
 
 meters = (
@@ -50,7 +50,6 @@ selected_meter = st.selectbox(
     meters["User_ID"].tolist(),
 )
 
-# Reset state when meter changes
 if st.session_state.get("current_meter") != selected_meter:
     st.session_state.current_meter = selected_meter
     st.session_state.offer = None
@@ -60,18 +59,14 @@ if st.session_state.get("current_meter") != selected_meter:
 meter_df = df[df["User_ID"] == selected_meter].sort_values("Transaction_Date")
 service_provider = meter_df["Service_Provider"].iloc[0]
 
-st.markdown(
-    f"**Service Provider:** `{service_provider}`"
-)
-
+st.markdown(f"**Service Provider:** `{service_provider}`")
 st.divider()
 
 # --------------------------------------------------
-# Last transactions
+# Recent transactions
 # --------------------------------------------------
 
 st.markdown("### Recent Activity (Last 5 Transactions)")
-
 st.dataframe(
     meter_df.tail(5)[
         [
@@ -90,9 +85,7 @@ st.dataframe(
 # --------------------------------------------------
 
 today = meter_df["Transaction_Date"].max()
-window_start = today - timedelta(days=60)
-
-recent = meter_df[meter_df["Transaction_Date"] >= window_start]
+recent = meter_df[meter_df["Transaction_Date"] >= today - timedelta(days=60)]
 successful = recent[recent["Status"].isin(SUCCESS_STATUSES)]
 
 vend_count = len(successful)
@@ -130,22 +123,21 @@ features = {
 }
 
 # --------------------------------------------------
-# Behaviour summary (human-readable)
+# Behaviour summary
 # --------------------------------------------------
 
 st.markdown("### Behaviour Summary")
 
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("Vends (60d)", vend_count)
-col2.metric("Median Vend (₦)", f"{int(median_vend):,}")
-col3.metric("Failed Attempts (%)", f"{failed_ratio:.1f}%")
-col4.metric("Days Since Last Vend", days_since_last)
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Vends (60d)", vend_count)
+c2.metric("Median Vend (₦)", f"{int(median_vend):,}")
+c3.metric("Failed Attempts (%)", f"{failed_ratio:.1f}%")
+c4.metric("Days Since Last Vend", days_since_last)
 
 st.divider()
 
 # --------------------------------------------------
-# Vend simulation
+# Vend simulation inputs
 # --------------------------------------------------
 
 st.markdown("### Vend Simulation")
@@ -168,7 +160,6 @@ with right:
         step=500,
     )
 
-# Initialize state
 st.session_state.setdefault("offer", None)
 st.session_state.setdefault("decision_made", None)
 
@@ -179,36 +170,23 @@ st.session_state.setdefault("decision_made", None)
 if st.button("Simulate Vend", use_container_width=True):
     with st.spinner("Contacting Monsera decision engine..."):
         try:
-            response = requests.post(
-                API_URL,
-                json=features,
-                timeout=30,
-            )
+            response = requests.post(API_URL, json=features, timeout=30)
             response.raise_for_status()
             decision = response.json()
-
         except requests.exceptions.RequestException:
-            st.error(
-                "Decision engine is temporarily unavailable. "
-                "Please try again."
-            )
+            st.error("Decision engine unavailable. Please try again.")
             st.stop()
 
     if not decision["eligible"]:
         st.session_state.offer = None
         st.session_state.decision_made = "DECLINED"
-
         st.error("❌ Credit declined (extreme risk detected)")
-        st.caption(
-            "Declines at V0 occur only in cases of extreme abuse "
-            "or long-term inactivity."
-        )
     else:
         st.session_state.offer = decision
         st.session_state.decision_made = None
 
 # --------------------------------------------------
-# Offer display
+# Offer + repayment preview
 # --------------------------------------------------
 
 if st.session_state.offer and st.session_state.decision_made is None:
@@ -225,18 +203,54 @@ if st.session_state.offer and st.session_state.decision_made is None:
             "while the system continues to learn."
         )
 
-    st.caption(
-        "Advance amounts vary continuously based on recent meter behaviour."
+    st.caption("Advance amounts vary continuously based on meter behaviour.")
+
+    # --------------------------------------------------
+    # Choose final vend amount
+    # --------------------------------------------------
+
+    if approved > vend_request:
+        st.markdown("### Confirm Vend Amount")
+
+        choice = st.radio(
+            f"You requested ₦{vend_request:,}, but you are eligible for up to ₦{approved:,}.",
+            ["Proceed with requested amount", "Increase vend amount"],
+        )
+
+        if choice == "Increase vend amount":
+            final_vend_amount = st.slider(
+                "Select vend amount (₦)",
+                min_value=vend_request,
+                max_value=approved,
+                step=500,
+                value=vend_request,
+            )
+        else:
+            final_vend_amount = vend_request
+    else:
+        final_vend_amount = vend_request
+
+    # --------------------------------------------------
+    # Repayment preview (NEW)
+    # --------------------------------------------------
+
+    credit_used = max(final_vend_amount - wallet_balance, 0)
+
+    st.markdown("### Repayment Preview")
+    st.info(
+        f"You will use **₦{credit_used:,}** in credit.\n\n"
+        f"This amount will be **automatically recovered on your next successful vend** "
+        f"before new electricity is credited."
     )
+
+    st.divider()
 
     c1, c2 = st.columns(2)
 
     with c1:
-        if st.button("✅ Accept Offer", use_container_width=True):
+        if st.button("✅ Confirm & Vend", use_container_width=True):
             st.session_state.decision_made = "ACCEPTED"
-            st.session_state.vend_amount = min(
-                vend_request, total_available
-            )
+            st.session_state.vend_amount = final_vend_amount
             st.session_state.offer = None
 
     with c2:
@@ -249,11 +263,9 @@ if st.session_state.offer and st.session_state.decision_made is None:
 # --------------------------------------------------
 
 if st.session_state.decision_made == "ACCEPTED":
-    st.success(
-        f"⚡ Vend completed for ₦{st.session_state.vend_amount:,}"
-    )
+    st.success(f"⚡ Vend completed for ₦{st.session_state.vend_amount:,}")
     st.markdown("💰 **DisCo paid in full**")
-    st.markdown("📅 **Repayment scheduled on next vend**")
+    st.markdown("📅 **Credit recovered on next vend**")
 
 elif st.session_state.decision_made == "DECLINED":
     st.warning("Customer declined the credit offer.")
