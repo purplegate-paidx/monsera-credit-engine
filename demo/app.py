@@ -88,6 +88,20 @@ today = meter_df["Transaction_Date"].max()
 recent = meter_df[meter_df["Transaction_Date"] >= today - timedelta(days=60)]
 successful = recent[recent["Status"].isin(SUCCESS_STATUSES)]
 
+# Calculate inter-vend gaps (in days)
+if len(successful) >= 3:
+    inter_vend_gaps = (
+        successful
+        .sort_values("Transaction_Date")["Transaction_Date"]
+        .diff()
+        .dt.days
+        .dropna()
+    )
+    inter_vend_variance = inter_vend_gaps.var()
+else:
+    inter_vend_variance = 0
+
+
 vend_count = len(successful)
 total_attempts = len(recent)
 
@@ -117,7 +131,7 @@ features = {
     "vend_frequency": float(vend_count / 2),
     "median_vend_amount": float(median_vend),
     "vend_amount_volatility": float(volatility),
-    "inter_vend_variance": 0,
+    "inter_vend_variance": float(inter_vend_variance),
     "failed_vend_ratio": float(failed_ratio),
     "has_active_obligation": False,
 }
