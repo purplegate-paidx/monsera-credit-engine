@@ -4,110 +4,80 @@ This guide explains how to use the V0 credit model both programmatically and via
 
 ---
 
-## 1. Direct Python Usage
+## 1. Feature Preparation
 
-The core scoring logic can be imported directly into your Python code.
+Aggregators or Monsera compute behavioural features per meter:
 
-### Example
+- Vend count (last 60–90 days)
+- Median vend amount
+- Vend frequency
+- Volatility metrics
+- Failed vend ratio
+- Days since last vend
+- Outstanding obligation flag
+
+---
+
+## 2. Decision Flow
+
+Call the decision engine with prepared features.
+
+Example (Python):
 
 ```python
-from credit_engine.scoring import v0_score
+from credit_engine.scoring import v0_decision
 
-result = v0_score(
-    tenure_months=6,
-    avg_monthly_spend=4500,
-    vend_frequency=3,
-    amount_volatility=40,
-    failed_vend_ratio=8,
-    is_new_user=False
-)
-
-print(result)
-```
-
-### Sample Output
-
-```json
-{
-  "score": 68,
-  "risk_band": "Bankable",
-  "credit_limit": 4500
-}
+decision = v0_decision(features)
 ```
 
 ---
 
-## 2. API Usage
+## Api Usage
 
-The model is also exposed as a FastAPI service.
-
-### Start the API Server
-
-```bash
-uvicorn api.main:app --reload
-```
-
----
-
-## 3. API Endpoint Reference
-
-### `POST /score`
-
-#### Request Body
+### `POST /decision`
 
 ```json
 {
-  "tenure_months": 6,
-  "avg_monthly_spend": 4500,
+  "vend_count_last_60_days": 12,
+  "days_since_last_vend": 3,
   "vend_frequency": 3,
-  "amount_volatility": 40,
-  "failed_vend_ratio": 8,
-  "is_new_user": false
+  "median_vend_amount": 4000,
+  "vend_amount_volatility": 35,
+  "inter_vend_variance": 30,
+  "failed_vend_ratio": 6,
+  "has_active_obligation": false
 }
 ```
-
-#### Response
+## Response
 
 ```json
 {
-  "score": 68,
-  "risk_band": "Bankable",
-  "credit_limit": 4500
+  "eligible": true,
+  "score": 72,
+  "band": "B",
+  "approved_amount": 3200
 }
 ```
+
+## 4. Decline Example
+
+```json
+{
+  "eligible": false,
+  "reason": "INSUFFICIENT_HISTORY",
+  "approved_amount": 0
+}
+```
+
+## 5. Operational Notes
+
+- Approved amount may be less than requested
+- Portfolio-level caps may override approvals
+- All decisions are logged for monitoring and model evolution
 
 ---
 
-## 4. Example: New User
-
-For users with no historical data, set `is_new_user` to `true` and provide zero values for other fields.
-
-#### Request
-
-```json
-{
-  "tenure_months": 0,
-  "avg_monthly_spend": 0,
-  "vend_frequency": 0,
-  "amount_volatility": 0,
-  "failed_vend_ratio": 0,
-  "is_new_user": true
-}
-```
-
-#### Response
-
-```json
-{
-  "score": 45,
-  "risk_band": "Marginal",
-  "credit_limit": 2000
-}
-```
-
----
-
-## 5. Common Use Cases
+## 6. Common Use Cases
 
 - Embed directly in backend services for real-time scoring
 - Use as a decision engine behind utility or payment platforms
@@ -116,7 +86,7 @@ For users with no historical data, set `is_new_user` to `true` and provide zero 
 
 ---
 
-## 6. Best Practices & Notes
+## 7. Best Practices & Notes
 
 - **Input Validation:** Always validate inputs before passing to the scoring function
 - **Monitoring:** Regularly track approval rates and default rates

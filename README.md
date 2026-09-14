@@ -1,17 +1,18 @@
 # Monsera v0 Credit Scoring & Advancement Model
 
 
-This repository contains the **V0 rule-based credit scoring engine** used for determining user eligibility and deciding the advancement (credit) amount offered to electricity meter users.
+This repository contains the **V0 behavioural and rule-based credit scoring engine** used for determining user eligibility and deciding the advancement (credit) amount offered to electricity meter users.
 The V0 model is deterministic, explainable, and designed as the foundation for more advanced ML-powered versions.
 
 
 ## Project Purpose
 
-The Monsera Credit Engine computes:
+The Monsera Credit Engine is designed to:
 
-- A **credit score** (0–100) using simple behavioral rules
-- A **risk category**
-- An **advance limit** (₦2,000–₦20,000)
+- Determine **whether a meter is eligible** for an advance
+- Compute a **behaviour score** (0–100) based on observed vending patterns
+- Assign a **risk band**
+- Recommend an **advance amount** within safe limits
 
 
 This v0 is deliberately **deterministic and transparent**. It is designed to be:
@@ -22,88 +23,145 @@ This v0 is deliberately **deterministic and transparent**. It is designed to be:
 
 ---
 
-## Scoring Bands
+## High-Level Decision Flow (v0)
 
-The model assumes a **score between 0 and 100** (inclusive), and maps it to four
-risk buckets:
+The V0 engine operates as a **layered decision system**, not a single score:
 
-| Score Range | Category     | Description |
-|------------|--------------|-------------|
-| 0–39       | High Risk    | Not eligible for advance |
-| 40–59      | Marginal     | Eligible for minimum advance only |
-| 60–79      | Bankable     | Eligible for moderate advance |
-| 80–100     | Prime Meter  | Eligible for maximum advance |
+Meter Behavioural Data
+↓
+Hard Gates (Eligibility)
+↓
+Behaviour Score (0–100)
+↓
+Risk Band Assignment
+↓
+Advance Limit Sizing
+↓
+Portfolio / Liquidity Constraints
 
----
 
-## Advancement Limits & Eligibility Rules (v0)
-
-All amounts are in **Naira (₦)** by default.
-
-Global limits:
-
-- **Minimum advance:** `₦2,000`
-- **Maximum advance:** `₦20,000` (or capped lower by advisory/team policy)
-- **Available float:** the maximum that can be disbursed at that moment
-  (e.g. wallet balance or liquidity pool)
-
-High-level rules:
-
-1. **New users**  
-   - Only eligible for **minimum** advance (₦2,000)
-
-2. **Existing users**  
-   - Must have score ≥ 40 to be eligible.
-   - Per-band caps (applied on top of global max and available float):
-
-     | Band        | Score Range | Band Cap (default) |
-     |------------|-------------|--------------------|
-     | HIGH_RISK  | 0–39        | ₦0 (not eligible)  |
-     | MARGINAL   | 40–59       | 25% of global max  |
-     | BANKABLE   | 60–79       | 50% of global max  |
-     | PRIME      | 80–100      | 100% of global max |
-
-   The **final recommended advance** is the minimum of:
-   - Band cap
-   - Global max advance
-   - Available float
-   - An optional advisory cap (e.g. from risk team, product config)
-
-3. **Available float always wins**  
-   If available float is less than:
-   - The minimum advance → the user is considered **temporarily ineligible**
-     (no liquidity).
-   - The calculated band cap → recommend only up to the available float.
-
-4. **Team advisory cap**  
-   The product / risk team can set a **runtime advisory cap** (e.g. for a
-   specific cohort, campaign, or pilot). This cap further constrains the
-   maximum advance recommended by the engine.
+Each stage serves a distinct risk-control purpose.
 
 ---
 
-## Scoring Inputs
+## Stage 1: Hard Gates (Eligibility)
 
-The V0 model uses the following inputs:
+Before any scoring occurs, meters must pass mandatory **eligibility checks**.
 
-- `tenure_months` – How long the meter has been active  
-- `avg_monthly_spend` – Average monthly utility spend  
-- `vend_frequency` – Average number of vends per month  
-- `amount_volatility` – Variability in vend amounts (percentage)  
-- `failed_vend_ratio` – Percentage of failed vending attempts  
-- `is_new_user` – Boolean flag for first-time users  
+A meter is immediately **ineligible** if any of the following apply:
+
+- Active outstanding obligation
+- Insufficient recent vending history
+- Dormant usage pattern (no recent vends)
+- Excessive failed vend attempts
+- Severe instability or suspicious behaviour
+
+If a hard gate fails, **no score is computed**, and the request is declined with a clear reason.
 
 ---
 
+## Stage 2: Behaviour Score (0–100)
 
-### Project Structure (Explanation)
+Eligible meters are scored using **observable vending behaviour only**.
 
-The repository is organized to clearly separate **business logic**, **delivery (API)**, **testing**, and **documentation**, making the project easy to understand, maintain, and extend.
+The behaviour score captures:
+
+- **Repayment opportunities** – vend frequency
+- **Predictability** – inter-vend consistency and amount volatility
+- **Typical capacity** – median vend amount (not total spend)
+- **Reliability** – failed vend attempts and transaction friction
+
+The score is mapped into four bands:
+
+| Score Range | Band | Meaning     |
+|------------|------|-------------|
+| 80–100     | A    | Strong      |
+| 65–79      | B    | Good        |
+| 50–64      | C    | Marginal    |
+| <50        | D    | Decline     |
+
+Only bands **A–C** are eligible for an advance.
+
+---
+
+## Stage 3: Advance Limit Sizing
+
+Advance amounts are derived from **observed behaviour**, not requested amounts alone.
+
+Limit sizing follows these steps:
+
+1. Compute a **base limit** from median vend behaviour
+2. Apply **band-specific caps**
+3. Apply **risk multipliers** (e.g. low frequency, high volatility)
+4. Enforce minimum and maximum advance limits
+
+Final rule:
+
+Approved Advance = min(Requested Amount, Adjusted Behavioural Limit)
+
+
+This ensures exposure remains proportional to how the meter typically behaves.
+
+---
+
+## Stage 4: Portfolio & Liquidity Constraints
+
+Independent of meter-level decisions, the system enforces:
+
+- Available float / wallet balance
+- Daily portfolio caps
+- Channel or cohort-specific limits
+- Emergency kill switches
+
+If available float is below the minimum advance, the user is **temporarily ineligible due to liquidity**, even if otherwise eligible.
+
+---
+
+## Advancement Limits (v0 Defaults)
+
+All amounts are in **Naira (₦)**.
+
+- **Minimum advance:** ₦2,000
+- **Maximum advance:** ₦20,000 (subject to policy and liquidity)
+- **New users:** restricted to minimum exposure only
+
+Final approved amounts are always constrained by:
+- Behaviour-derived limit
+- Global maximum
+- Available float
+- Optional advisory or risk-team caps
+
+---
+
+## Behavioural Inputs
+
+The V0 model relies on the following inputs (computed from vending data):
+
+- Vend count over recent period
+- Days since last vend
+- Vend frequency
+- Median vend amount
+- Vend amount volatility
+- Inter-vend interval variance
+- Failed vend ratio
+- Active obligation flag
+- New user indicator
+
+No credit bureau, income, or demographic data is used.
+
+---
+
+## Project Structure
+
+The repository is organized to separate **decision logic**, **delivery**, **testing**, and **documentation**.
 
 * **`src/credit_engine/`**
   Contains the core V0 credit scoring logic. This is where all business rules live.
 
-  * `scoring.py` – Implements the V0 scoring, risk classification, and advance calculation logic
+  * `hard_gates.py` - Eligibility Checks
+  * `behaviour_score.py` - Behaviour Score (0 - 100)
+  * `limit_engine.py` - Advanced Sizing Logic 
+  * `scoring.py` – Implements the decision orchestrator
   * `config.py` – Centralized configuration for thresholds, weights, and limits
   * `utils.py` – Shared helper functions used across the project
 
@@ -229,7 +287,11 @@ To run all unit tests:
 pytest
 ```
 
-This validates both the scoring logic and the API behavior.
+This validates:
+- Hard gate logic
+- Behaviour scoring
+- Limit sizing
+Api integration
 
 ---
 

@@ -4,56 +4,62 @@ from api.main import app
 client = TestClient(app)
 
 
-def test_score_endpoint_bankable_user():
-    """
-    Test that the /score endpoint returns a valid response
-    for a typical bankable user.
-    """
-
+def base_payload(**overrides):
     payload = {
-        "tenure_months": 6,
-        "avg_monthly_spend": 4500,
+        "vend_count_last_60_days": 8,
+        "days_since_last_vend": 5,
         "vend_frequency": 3,
-        "amount_volatility": 40,
-        "failed_vend_ratio": 8,
-        "is_new_user": False
+        "median_vend_amount": 4000,
+        "vend_amount_volatility": 30,
+        "inter_vend_variance": 20,
+        "failed_vend_ratio": 10,
+        "has_active_obligation": False,
     }
+    payload.update(overrides)
+    return payload
 
-    response = client.post("/score", json=payload)
 
-    assert response.status_code == 200
-
+def test_api_approves_normal_user():
+    response = client.post("/decision", json=base_payload())
     data = response.json()
 
-    # Validate response structure
-    assert "score" in data
-    assert "risk_band" in data
-    assert "credit_limit" in data
-
-    # Validate expected logic
-    assert data["risk_band"] in ["Marginal", "Bankable", "Prime Meter"]
-    assert data["credit_limit"] >= 0
-
-
-def test_score_endpoint_new_user():
-    """
-    Test that new users always receive the minimum limit.
-    """
-
-    payload = {
-        "tenure_months": 0,
-        "avg_monthly_spend": 0,
-        "vend_frequency": 0,
-        "amount_volatility": 0,
-        "failed_vend_ratio": 0,
-        "is_new_user": True
-    }
-
-    response = client.post("/score", json=payload)
-
     assert response.status_code == 200
+    assert data["eligible"] is True
+    assert data["approved_amount"] >= 2000
 
+
+def test_api_low_history_user_gets_minimum():
+    response = client.post(
+        "/decision",
+        json=base_payload(vend_count_last_60_days=1),
+    )
     data = response.json()
 
-    assert data["risk_band"] == "Marginal"
-    assert data["credit_limit"] == 2000
+    assert data["eligible"] is True
+    assert data["approved_amount"] == 2000
+
+
+def test_api_high_volatility_not_declined():
+    response = client.post(
+        "/decision",
+        json=base_payload(vend_amount_volatility=95),
+    )
+    data = response.json()
+
+    assert data["eligible"] is True
+    assert data["approved_amount"] >= 2000
+
+
+def test_api_band_c_never_exceeds_cap():
+    response = client.post(
+        "/decision",
+        json=base_payload(
+            vend_count_last_60_days=4,
+            failed_vend_ratio=30,   # likely Band C
+            median_vend_amount=20000,
+        ),
+    )
+    data = response.json()
+
+    assert data["band"] == "C"
+    assert data["approved_amount"] <= 5000

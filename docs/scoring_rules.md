@@ -1,100 +1,57 @@
-# Scoring Rules – V0 Model
+# Scoring Rules – V0 Behaviour Model
 
-This document details the exact rules and weights used to compute the V0 credit score.
-
-The total score ranges from **0 to 100** and is derived by summing contributions from multiple factors.
+This document describes how the behaviour score (0–100) is calculated.
 
 ---
 
-## 1. Tenure (Meter Age)
+## 1. Frequency Score (0–30)
 
-Measures the stability and longevity of the meter.
+Higher vend frequency implies more repayment checkpoints.
 
-| Tenure (Months) | Score |
-|-----------------|-------|
-| ≥ 12            | +20   |
-| 6–11            | +15   |
-| 3–5             | +10   |
-| < 3             | +5    |
-
----
-
-## 2. Average Monthly Spend
-
-Serves as a proxy for consumption capacity and repayment ability.
-
-| Monthly Spend (₦) | Score |
-|-------------------|-------|
-| ≥ 8,000           | +25   |
-| 5,000–7,999       | +20   |
-| 3,000–4,999       | +15   |
-| < 3,000           | +10   |
+| Frequency | Score |
+|---------|-------|
+| ≥5 | 30 |
+| 3–4 | 20 |
+| 1–2 | 10 |
+| <1 | 0 |
 
 ---
 
-## 3. Vend Frequency
+## 2. Consistency Score (0–25)
 
-Captures consistency and regularity of usage.
+Consistency combines:
+- Inter-vend interval variance
+- Vend amount volatility
 
-| Vends per Month | Score |
-|-----------------|-------|
-| ≥ 5             | +20   |
-| 3–4             | +15   |
-| 1–2             | +10   |
-| < 1             | +5    |
+Lower volatility and predictable timing score higher.
 
 ---
 
-## 4. Amount Volatility
+## 3. Capacity Score (0–25)
 
-Measures stability of vend amounts over time.
+Capacity is based on **median vend amount**, not total spend.
 
-| Volatility (%) | Score |
-|---------------|-------|
-| ≤ 30%         | +20   |
-| 31–60%        | +10   |
-| > 60%         | +5    |
+High volatility reduces effective capacity.
 
 ---
 
-## 5. Failed Vend Penalties
+## 4. Reliability Score (0–20)
 
-Failed vending attempts indicate liquidity stress or operational issues.
+Based on:
+- Failed vend attempts
+- Transaction friction
 
-| Failed Vend Ratio | Penalty |
-|-------------------|---------|
-| ≥ 20%             | −20     |
-| 10–19%            | −10     |
-| < 10%             | 0       |
+High failure rates reduce reliability.
 
 ---
 
-## Score Bounding
+## Score Bands
 
-After all components are summed, the final score is **clamped between 0 and 100** to prevent out-of-range values.
+| Score | Band |
+|------|------|
+| 80–100 | A |
+| 65–79 | B |
+| 50–64 | C |
+| <50 | D |
 
----
-
-## Risk Band Mapping
-
-| Score Range | Risk Band   |
-|------------|-------------|
-| 0–39       | High Risk   |
-| 40–59      | Marginal    |
-| 60–79      | Bankable    |
-| 80–100     | Prime Meter |
-
----
-
-## Credit Limit Rules
-
-| Risk Band   | Credit Limit Rule |
-|------------|-------------------|
-| High Risk  | ₦0 (not eligible) |
-| Marginal   | ₦2,000 (minimum) |
-| Bankable   | Up to 10% of avg monthly spend (max ₦10,000) |
-| Prime      | Up to 20% of avg monthly spend (max ₦20,000) |
-
----
-
-These rules are intentionally conservative and designed for early-stage deployment.
+Only bands A–C are eligible for advances.
